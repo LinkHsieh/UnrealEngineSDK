@@ -125,6 +125,9 @@ public:
 		check(IsInGameThread());
 		return IsStereoEnabled();
 	}
+
+    void SetMotionPredictionFactor(bool bPredictionOn, bool bOpenVsync, float scale, int maxFps);
+    void SetStereoEffectParam(float fov , float gazePlane);
 #if PLATFORM_WINDOWS
 public:
 	FTexture2DRHIRef			            MirrorTexture = NULL;
@@ -265,6 +268,14 @@ private:
 
 	float InterpupillaryDistance;
 
+    float MotionPredictionFactor;
+    float AspectRatio;
+    float HFOV;
+    float GazePlane;
+
+    bool bVsyncOn;
+    bool bIsMotionPredictionOn;
+
 	mutable FQuat			CurHmdOrientation;
 	FQuat DeltaControlOrientation; // same as DeltaControlRotation but as quat
 	FRotator DeltaControlRotation;
@@ -281,6 +292,7 @@ private:
 	FDistortionMesh DistorMesh[2];
 
 	void GetCurrentPose(FQuat& CurrentHmdOrientation, FVector& CurrentHmdPosition);
+	void SetVsync(bool bOpenVsync, float maxFps);
 };
 
 FORCEINLINE FMatrix ToFMatrix(const szvrMatrix4f& vtm)

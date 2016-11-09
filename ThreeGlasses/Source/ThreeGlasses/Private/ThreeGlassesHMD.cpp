@@ -638,15 +638,38 @@ void FThreeGlassesHMD::CalculateStereoViewOffset(const enum EStereoscopicPass St
 
 FMatrix FThreeGlassesHMD::GetStereoProjectionMatrix(const enum EStereoscopicPass StereoPassType, const float FOV) const
 {
-	const float ProjectionCenterOffset = 0.1f;
-	const float PassProjectionOffset = (StereoPassType == eSSP_LEFT_EYE) ? ProjectionCenterOffset : -ProjectionCenterOffset;
+    float ZNear = GNearClippingPlane;
+    float wd = ZNear * FMath::Abs(FMath::Tan(HFOV * PI / 180.0f * 0.5f) * 2.0f);
+    float r = wd;
+    float l = -wd;
+    float t = wd / (AspectRatio * 0.5f);
+    float b = -wd / (AspectRatio * 0.5f);
 
-	return FMatrix(
-		FPlane(FMath::Tan(0.5*PI-HFOVInRadians), 0.0f, 0.0f, 0.0f),
-		FPlane(0.0f, FMath::Tan(0.5*PI - HFOVInRadians), 0.0f, 0.0f),
-		FPlane(0.0f, 0.0f, 0.0f, 1.0f),
-		FPlane(0.0f, 0.0f, GNearClippingPlane, 0.0f))
-		* FTranslationMatrix(FVector(PassProjectionOffset, 0, 0));
+    float offest = GetInterpupillaryDistance() * WorldToMetersScale * 0.5f / GazePlane;
+    if (StereoPassType == eSSP_RIGHT_EYE)//eSSP_LEFT_EYE eSSP_RIGHT_EYE
+    {
+        r = r - offest;
+        l = l - offest;
+    }
+    else
+    {
+        r = r + offest;
+        l = l + offest;
+    }
+
+    float SumRL = (r + l);
+    float SumTB = (t + b);
+    float InvRL = (1.0f / (r - l));
+    float InvTB = (1.0f / (t - b));
+
+    FMatrix Mat = FMatrix(
+        FPlane((2.0f * ZNear * InvRL), 0.0f, 0.0f, 0.0f),
+        FPlane(0.0f, (2.0f * ZNear * InvTB), 0.0f, 0.0f),
+        FPlane((SumRL * InvRL), (SumTB * InvTB), 0.0f, 1.0f),
+        FPlane(0.0f, 0.0f, ZNear, 0.0f)
+        );
+
+    return Mat;
 }
 
 void FThreeGlassesHMD::InitCanvasFromView(FSceneView* InView, UCanvas* Canvas)
@@ -779,11 +802,48 @@ void FThreeGlassesHMD::OnEndPlay(FWorldContext& InWorldContext)
 void FThreeGlassesHMD::PreRenderView_RenderThread(FRHICommandListImmediate& RHICmdList, FSceneView& InView)
 {
 	check(IsInRenderingThread());
+	/**
+	* Motion Prediction for D2
+	*/
+    //if (!bIsMotionPredictionOn)
+    //    return;
+    //FQuat lQuatNow;
+    //FVector lPosNow;
+    //GetCurrentPose(lQuatNow, lPosNow);
+
+    //FQuat DeltaOrient = InView.BaseHmdOrientation.Inverse() * lQuatNow;
+    //FVector lRotateVec;
+    //float lRotateAngle;
+    //DeltaOrient.ToAxisAndAngle(lRotateVec, lRotateAngle);
+
+    //FQuat PreDeltaOri = FQuat(lRotateVec, lRotateAngle * MotionPredictionFactor);
+
+    //InView.ViewRotation = FRotator(InView.ViewRotation.Quaternion() * PreDeltaOri);
+
+    //InView.UpdateViewMatrix();
 }
 
 void FThreeGlassesHMD::PreRenderViewFamily_RenderThread(FRHICommandListImmediate& RHICmdList, FSceneViewFamily& ViewFamily)
 {
 	check(IsInRenderingThread());
+	/**
+	* Motion Prediction for D2
+	*/
+    //if (!bIsMotionPredictionOn)
+    //    return;
+
+    //const FSceneView* MainView = ViewFamily.Views[0];
+    //const float WorldToMetersScale = MainView->WorldToMetersScale;
+
+    //const FTransform OldRelativeTransform(MainView->BaseHmdOrientation, MainView->BaseHmdLocation);
+
+    //FQuat lNewQuat;
+    //FVector lNewPosNow;
+    //GetCurrentPose(lNewQuat, lNewPosNow);
+
+    //const FTransform NewRelativeTransform(lNewQuat, MainView->BaseHmdLocation);
+
+    //ApplyLateUpdate(ViewFamily.Scene, OldRelativeTransform, NewRelativeTransform);
 }
 
 void FThreeGlassesHMD::Startup()
@@ -792,6 +852,13 @@ void FThreeGlassesHMD::Startup()
 	GEngine->bSmoothFrameRate = false;
 	static IConsoleVariable* CVSyncVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.VSync"));
 	CVSyncVar->Set(true);
+
+    int x, y, w, h;
+    if (SZVR_GetHmdMonitor(&x, &y, &w, &h))
+    {
+        AspectRatio = (float)w / (float)h;
+        UE_LOG(LogClass, Log, TEXT("AspectRatio: %f, W %d, H %d"), AspectRatio, w, h);
+    }
 
 	//for (int eyeIndex = szvrEye_Left; eyeIndex < szvrEye_Count; ++eyeIndex)
 	//{
@@ -908,10 +975,18 @@ FThreeGlassesHMD::FThreeGlassesHMD() :
 	SZVR_GetHeadDisplayDevice(pHmd);
 	Hmd = pHmd;
 
-	SZVR_GetInterpupillaryDistance(&InterpupillaryDistance);
+    bVsyncOn = true;
+    bIsMotionPredictionOn = true;
+    MotionPredictionFactor = 1.367f;
+    HFOV = 65.0f;
+    GazePlane = 33.95749f;
+    AspectRatio = 1.777778f;
+    
+    SZVR_GetInterpupillaryDistance(&InterpupillaryDistance);
 	HFOVInRadians = PI*110.f/360.f;// Hmd->CameraFrustumHFovInRadians;
 	VFOVInRadians = PI*110.f /360.f;// Hmd->CameraFrustumVFovInRadians;
 	Startup();
+    SetVsync(bVsyncOn, 60.0f);
 	InitDevice();
 }
 
@@ -1268,5 +1343,36 @@ void FThreeGlassesHMD::InitWindow(HINSTANCE hInst)
 
 	SwapChain->SetFullscreenState(true, NULL);
 }
+
+void FThreeGlassesHMD::SetMotionPredictionFactor(bool bPredictionOn, bool bOpenVsync, float scale, int maxFps)
+{
+    if (scale <= 0)
+        return;
+
+    bIsMotionPredictionOn = bPredictionOn;
+    MotionPredictionFactor = scale;
+	SetVsync(bOpenVsync, maxFps);
+}
+
+void FThreeGlassesHMD::SetVsync(bool bOpenVsync, float maxFps)
+{
+	bVsyncOn = bOpenVsync;
+	static IConsoleVariable* CVSyncVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.VSync"));
+	static IConsoleVariable* CMaxFPSVar = IConsoleManager::Get().FindConsoleVariable(TEXT("t.MaxFPS"));
+	CMaxFPSVar->Set(maxFps);
+	int32 value = bVsyncOn;
+	if (value != CVSyncVar->GetInt())
+	{
+		CVSyncVar->Set(value);
+		UE_LOG(LogClass, Log, TEXT("Vsync Stat: %d"), value);
+	}
+}
+
+void FThreeGlassesHMD::SetStereoEffectParam(float fov, float gazePlane)
+{
+	HFOV = fov;
+    GazePlane = gazePlane;
+}
+
 
 #endif //THREE_GLASSES_SUPPORTED_PLATFORMS
